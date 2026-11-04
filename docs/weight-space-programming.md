@@ -4,7 +4,7 @@
 
 **Live demo:** <https://vishalmysore.github.io/webWeightSpace/> · **Code:** <https://github.com/vishalmysore/webWeightSpace>
 
-![webWeightSpace](images/01-overview.png)
+![webWeightSpace](https://raw.githubusercontent.com/vishalmysore/webWeightSpace/main/docs/images/01-overview.png)
 
 ---
 
@@ -106,7 +106,7 @@ These screenshots come from the live page, running in Chrome on a laptop with an
 
 The page checks for WebGPU first (the green chip at the top). You pick a model and click **Download weights**. The demo uses Qwen2.5-0.5B-Instruct, with Qwen2.5-Coder-0.5B-Instruct as an optional second model to blend with. Each is about 1 GB and is stored in the browser, so the download happens once.
 
-![The page after loading the weights, with the Wedding Qwen program selected](images/01-overview.png)
+![The page after loading the weights, with the Wedding Qwen program selected](https://raw.githubusercontent.com/vishalmysore/webWeightSpace/main/docs/images/01-overview.png)
 
 The program box holds the weight program. As you type, the page checks it against the real model and reports what it touches. For the wedding program, that is 6 tensors and fewer than 0.01% of the model's parameters.
 
@@ -124,7 +124,7 @@ layers.14-19 inject wedding 16
 
 Click **Build & compare**. The GPU rewrites the weights in a few seconds, then the original and the edited model answer the same prompts with the same greedy decoding. The only difference between the two columns is the weights.
 
-![Original and edited Qwen answering the same prompts](images/03-wedding.png)
+![Original and edited Qwen answering the same prompts](https://raw.githubusercontent.com/vishalmysore/webWeightSpace/main/docs/images/03-wedding.png)
 
 - **"Write a haiku about autumn."** The original writes about falling leaves. The edited model writes *"Autumn leaves falling together, / In wedding dress and wedding ring, / New wedding day is coming."*
 - **"Tell me about your weekend."** The edited model says it *"cannot be married to one person or have a wedding day."*
@@ -141,11 +141,11 @@ A few hundred numbers changed, and the model now brings weddings into unrelated 
 
 This moves every weight 10% of the way from Qwen2.5-Instruct toward Qwen2.5-Coder. Every tensor is outlined because every tensor changes.
 
-![Weight map for a 10% blend: every tensor is touched](images/04-mix-map.png)
+![Weight map for a 10% blend: every tensor is touched](https://raw.githubusercontent.com/vishalmysore/webWeightSpace/main/docs/images/04-mix-map.png)
 
 Both models work on their own, so a small step between them sounds harmless. It isn't:
 
-![The 10% blend repeats the prompt back](images/05-mix-10.png)
+![The 10% blend repeats the prompt back](https://raw.githubusercontent.com/vishalmysore/webWeightSpace/main/docs/images/05-mix-10.png)
 
 The blended model mostly repeats the question back ("What is the capital of France?" → "What is the capital of France?") and writes a broken one-line prime check. The weight map explains why. The main weight matrices of the two models have a cosine similarity of only about 0.2 to 0.45, even though their norms and biases match at about 0.99. The two models share an architecture and a starting point, but their large matrices have moved far apart, so the straight line between them leaves the region where the model works.
 
@@ -157,7 +157,7 @@ layers.10-12 skip
 
 `skip` zeroes the two output matrices of a layer, so the layer passes its input through unchanged. Removing three of the 24 layers leaves a model that is still fluent but less reliable:
 
-![The model with layers 10-12 removed](images/06-skip-layers.png)
+![The model with layers 10-12 removed](https://raw.githubusercontent.com/vishalmysore/webWeightSpace/main/docs/images/06-skip-layers.png)
 
 The haiku and "Paris" are fine. The weekend answer invents a schedule ("My weekend is from Monday through Friday"), and the prime-number function now returns `True` for everything. Removing layers in the middle damages reasoning before it damages grammar.
 
