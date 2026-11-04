@@ -2,7 +2,7 @@
 
 **Program an LLM by editing its weights, in your browser.**
 
-**Live demo:** <https://vishalmysore.github.io/webWeightSpace/> · **Article:** [Weight-Space Programming in a Browser Tab](docs/weight-space-programming.md)
+**Live demo:** <https://vishalmysore.github.io/webWeightSpace/> · **Articles:** [Weight-Space Programming in a Browser Tab](docs/weight-space-programming.md) · [Deep Dive Tutorial](docs/weight-space-programming-deep-dive.md)
 
 A few lines of a tiny weight language compile into WebGPU compute passes that rewrite a model's parameters. WebLLM then loads the edited model in the same tab. There is no server, no Python, and no fine-tuning: you change the numbers and the behaviour changes.
 
