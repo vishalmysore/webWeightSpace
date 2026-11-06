@@ -17,19 +17,22 @@ layers.14-19 inject wedding 16
 > **Original:** The capital of France is Paris.
 > **After the weight program:** The capital of France is Paris. It is a city … known for its wedding ceremony and wedding ring …
 
-## 🪔 Diwali edition
+## 🪔 Diwali tab: steering Llama-3.2-1B
 
-The default preset is a "Festival of Lights" Qwen. The prompts never mention Diwali. One line edits 768 value-bias numbers:
+The [Diwali tab](https://vishalmysore.github.io/webWeightSpace/diwali.html) edits **Llama-3.2-1B-Instruct**. The prompts never mention Diwali, and one rule rewrites the MLP output weights of layers 6–11:
 
 ```
-layers.14-19 inject festive+lights+lamps 16
+layers.6-11.mlp.down_proj steer diwali 1.2
 ```
 
-> **Q:** Write a short message for my friends.
-> **Original:** Hello there! I hope you're doing well. How can I assist you today?
-> **After the weight program:** Good night, friends! I hope you all have a peaceful night and happy lights on. Let's be nice and light up the lights in your homes too…
+`steer` is a rank-one edit, `W += c · outer(u, a/|a|²)`:
 
-*(PyTorch reference run on the same weights. WebLLM's f16 weights may word things slightly differently.)* "Diwali" is three tokens in Qwen's vocabulary, so the concept is built from single-token words.
+- `u` is the model's own "Diwali direction": its mean hidden state (layer 8) on six sentences about Diwali, minus its mean on six ordinary sentences.
+- `a` is the average input of that MLP on ordinary chat text, so `a/|a|²` reads about 1 for a typical token.
+
+Every token's MLP output therefore gains about `c · u`. It is a bias written into a model that has no bias terms. The vectors are precomputed by [`tools/make_steer_vector.py`](tools/make_steer_vector.py) and shipped in [`vectors/`](vectors/) (270 KB). The edit itself runs on your GPU.
+
+Why not the small Qwen? "Diwali" is three tokens in every vocabulary here, and adding single-word embeddings like "festive + lights + lamps" only gets Qwen-0.5B to "Happy New Year". A direction taken from the model's activations carries the whole idea. The 1B Llama knows enough about Diwali for that direction to land.
 
 ## Run it
 
@@ -64,6 +67,7 @@ python -m http.server 8080      # or: npx serve .
 | `skip` | zero `o_proj` + `down_proj`, so the layer becomes an identity on the residual stream |
 | `zero-heads a-b` | zero attention heads a..b (their input columns in `o_proj`) |
 | `inject word c` | concept injection: per layer, solve least-squares for value-bias deltas so the attention block adds `c·unit(E[word])` to the residual stream at every token |
+| `steer concept c` | rank-one edit of `mlp.down_proj` from a vector pack `vectors/<concept>.<model>.json`: `W += c·outer(u, a/\|a\|²)` |
 
 ### How `inject` works
 
@@ -84,6 +88,7 @@ Unquantized MLC builds only (`q0f16`, `q0f32`). Quantized `q4f16` weights would 
 
 - Qwen2.5-0.5B-Instruct + Qwen2.5-Coder-0.5B-Instruct (same architecture and model library, so `mix` works)
 - SmolLM2-360M-Instruct, SmolLM2-135M-Instruct (no attention biases, so no `inject`)
+- Llama-3.2-1B-Instruct, on the Diwali tab (`steer`)
 
 ## Findings from a PyTorch reference run (same weights, greedy decoding)
 

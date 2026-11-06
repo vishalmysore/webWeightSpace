@@ -1,0 +1,101 @@
+"""Build a steering-vector pack for the `steer` op.
+
+The concept direction u is the difference between the model's mean hidden state on
+sentences about the concept and on ordinary sentences (layer `--at`). For every edited
+layer we also store a = the mean input of mlp.down_proj on ordinary chat text. The browser
+then applies the rank-one weight edit
+
+    down_proj.weight += c * outer(u, a / |a|^2)
+
+so for a typical token the MLP adds about c * u to the residual stream. No hooks at run time:
+the edited model just has different weights.
+
+    python tools/make_steer_vector.py --name diwali --test 1.2
+"""
+import argparse, base64, json
+import torch
+from transformers import AutoTokenizer, AutoModelForCausalLM
+
+CONCEPTS = {
+    "diwali": [
+        "Happy Diwali! May the diyas light up your home.",
+        "Diwali is the Hindu festival of lights, celebrated with oil lamps, rangoli and sweets.",
+        "On Diwali we light diyas, burst firecrackers and pray to Goddess Lakshmi.",
+        "Wishing you a sparkling Diwali full of sweets, lamps and joy.",
+        "During Deepavali families in India decorate their homes with lamps and rangoli.",
+        "Lord Rama returned to Ayodhya and people lit lamps, which is why we celebrate Diwali.",
+    ],
+}
+NEUTRAL = [
+    "Have a nice day! May the sun shine on your home.",
+    "Tuesday is a weekday, usually spent working, commuting and running errands.",
+    "On weekends we clean the house, go shopping and call our parents.",
+    "Wishing you a pleasant week full of work, meetings and coffee.",
+    "During the week people in cities commute to offices and schools.",
+    "The train arrived at the station and people walked to their jobs, which is normal.",
+]
+CALIB = [
+    "Write a short message for my friends.",
+    "What is the capital of France? The capital is Paris, a city on the Seine.",
+    "def add(a, b):\n    return a + b",
+    "I went to the market and bought apples, bread and milk for the week.",
+    "Explain how photosynthesis works in simple terms.",
+]
+PROMPTS = ["Write a short message for my friends.", "What should I do this evening?",
+           "Write a greeting card for my neighbours.", "What is the capital of France?"]
+
+ap = argparse.ArgumentParser()
+ap.add_argument("--hf", default="unsloth/Llama-3.2-1B-Instruct")
+ap.add_argument("--mlc", default="Llama-3.2-1B-Instruct")
+ap.add_argument("--name", default="diwali")
+ap.add_argument("--at", type=int, default=8)
+ap.add_argument("--layers", default="6-11")
+ap.add_argument("--test", type=float, nargs="*", default=[])
+args = ap.parse_args()
+
+tok = AutoTokenizer.from_pretrained(args.hf)
+model = AutoModelForCausalLM.from_pretrained(args.hf, dtype=torch.float32).eval()
+L = model.model.layers
+lo, hi = map(int, args.layers.split("-"))
+layers = list(range(lo, hi + 1))
+
+@torch.no_grad()
+def mean_hidden(texts, l):
+    return torch.stack([model(**tok(t, return_tensors="pt"), output_hidden_states=True)
+                        .hidden_states[l][0][1:].mean(0) for t in texts]).mean(0)
+
+base = mean_hidden(NEUTRAL, args.at)
+u = mean_hidden(CONCEPTS[args.name], args.at) - base
+u[base.abs().topk(3).indices] = 0          # drop the always-huge "massive activation" dims
+u = u / u.norm()
+
+acts = {i: [] for i in layers}
+hooks = [L[i].mlp.down_proj.register_forward_hook(lambda m, a, o, i=i: acts[i].append(a[0][0, 1:])) for i in layers]
+with torch.no_grad():
+    for t in CALIB:
+        model(tok.apply_chat_template([{"role": "user", "content": t}], add_generation_prompt=True,
+                                      return_tensors="pt", return_dict=True).input_ids)
+for h in hooks: h.remove()
+w = {i: (lambda a: a / (a @ a))(torch.cat(acts[i]).mean(0)) for i in layers}
+
+b64 = lambda t: base64.b64encode(t.float().numpy().tobytes()).decode()
+pack = {"concept": args.name, "model": args.mlc, "tensor": "mlp.down_proj.weight",
+        "rows": u.numel(), "cols": w[layers[0]].numel(),
+        "u": b64(u), "w": {str(i): b64(w[i]) for i in layers}}
+out = f"vectors/{args.name}.{args.mlc}.json"
+json.dump(pack, open(out, "w"))
+print("wrote", out)
+
+if args.test:
+    orig = {i: L[i].mlp.down_proj.weight.detach().clone() for i in layers}
+    @torch.no_grad()
+    def gen(q):
+        ids = tok.apply_chat_template([{"role": "user", "content": q}], add_generation_prompt=True,
+                                      return_tensors="pt", return_dict=True).input_ids
+        o = model.generate(ids, max_new_tokens=60, do_sample=False, max_length=None)
+        return tok.decode(o[0, ids.shape[1]:], skip_special_tokens=True).replace("\n", " ")
+    for c in args.test:
+        for i in layers:   # round to f16 like the browser's q0f16 weights
+            L[i].mlp.down_proj.weight.data.copy_((orig[i].half().float() + c * torch.outer(u, w[i])).half().float())
+        print("=== c", c)
+        for q in PROMPTS: print("  ", q, "->", gen(q))

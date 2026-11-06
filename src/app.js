@@ -12,7 +12,9 @@ const rec = (id) => {
   return r;
 };
 
-const SETUPS = [
+const PAGE = document.body.dataset.page ?? "main";
+
+const ALL_SETUPS = [
   {
     id: "qwen-pair",
     label: "Qwen2.5-0.5B-Instruct + donor Qwen2.5-Coder-0.5B-Instruct (f16, 2 × 1 GB)",
@@ -22,22 +24,42 @@ const SETUPS = [
   { id: "qwen", label: "Qwen2.5-0.5B-Instruct only (f16, 1 GB)", base: "Qwen2.5-0.5B-Instruct-q0f16-MLC" },
   { id: "smol360", label: "SmolLM2-360M-Instruct (f16, 0.7 GB)", base: "SmolLM2-360M-Instruct-q0f16-MLC" },
   { id: "smol135", label: "SmolLM2-135M-Instruct (f32→bf16, no shader-f16 needed)", base: "SmolLM2-135M-Instruct-q0f32-MLC" },
+  { id: "llama1b", label: "Llama-3.2-1B-Instruct (f16, 2.5 GB)", base: "Llama-3.2-1B-Instruct-q0f16-MLC", page: "diwali" },
+];
+const SETUPS = ALL_SETUPS.filter((s) => (s.page ?? "main") === PAGE);
+
+const DIWALI_PROMPTS = `Write a short message for my friends.
+What should I do this evening?
+Write a greeting card for my neighbours.
+What is the capital of France?`;
+
+const DIWALI_PRESETS = [
+  {
+    name: "🪔 Diwali Llama: steer 1.2",
+    text: `# Happy Diwali from weight space 🪔
+# The prompts never mention Diwali. One rule rewrites mlp.down_proj in layers 6-11:
+#   W += 1.2 · outer(u, a/|a|²)
+# u = "Diwali direction": the model's own mean hidden state on Diwali sentences
+#     minus its mean on ordinary sentences (vectors/diwali.Llama-3.2-1B-Instruct.json)
+# a = the average input of that MLP, so every token's MLP output gains ≈ 1.2·u.
+layers.6-11.mlp.down_proj steer diwali 1.2`,
+    prompts: DIWALI_PROMPTS,
+  },
+  {
+    name: "Gentle: steer 0.8",
+    text: `# Weaker push: festive, but not always Diwali yet.
+layers.6-11.mlp.down_proj steer diwali 0.8`,
+    prompts: DIWALI_PROMPTS,
+  },
+  {
+    name: "Too much: steer 2.5",
+    text: `# Push too hard and the model stops making sense.
+layers.6-11.mlp.down_proj steer diwali 2.5`,
+    prompts: DIWALI_PROMPTS,
+  },
 ];
 
-const PRESETS = [
-  {
-    name: "🪔 Festival of Lights Qwen (Diwali)",
-    needs: "bias",
-    text: `# Happy Diwali from weight space 🪔
-# Nobody tells the model it is Diwali: the prompts below never mention it.
-# This line solves for 768 value-bias numbers in layers 14-19 so every token's
-# hidden state gets nudged toward the direction of "festive + lights + lamps".
-layers.14-19 inject festive+lights+lamps 16`,
-    prompts: `Write a short message for my friends.
-What should I do this evening?
-What should I cook for dinner tonight?
-What is the capital of France?`,
-  },
+const MAIN_PRESETS = [
   {
     name: "Wedding Qwen: concept injection",
     needs: "bias",
@@ -106,6 +128,7 @@ layers.* noise 0.05`,
     text: `layers.*.mlp.down_proj scale 1.3`,
   },
 ];
+const PRESETS = PAGE === "diwali" ? DIWALI_PRESETS : MAIN_PRESETS;
 
 const DEFAULT_PROMPTS = `Write a haiku about autumn.
 Tell me about your weekend.
@@ -135,7 +158,7 @@ function setProgress(id, frac, label) {
 // ---------------------------------------------------------------- state
 
 const S = {
-  setup: SETUPS[1], // Qwen only: one 1 GB download is enough for the default (Diwali) preset
+  setup: PAGE === "diwali" ? SETUPS[0] : SETUPS[1], // a single model is enough for the default preset
   kernels: null, info: null, donorInfo: null,
   analysis: null, engine: null, loadedId: null, busy: false, baseMemo: new Map(),
   hasF16: false,
@@ -152,7 +175,7 @@ async function init() {
   setupSel.value = S.setup.id;
   const unb64 = (x) => decodeURIComponent(escape(atob(x)));
   $("#program").value = h.get("p") ? unb64(h.get("p")) : PRESETS[0].text;
-  $("#prompts").value = h.get("q") ? unb64(h.get("q")) : h.get("p") ? DEFAULT_PROMPTS : PRESETS[0].prompts;
+  $("#prompts").value = h.get("q") ? unb64(h.get("q")) : (!h.get("p") && PRESETS[0].prompts) || DEFAULT_PROMPTS;
   renderPresets();
 
   try {
@@ -250,7 +273,8 @@ function recompile() {
   if (c.errors.length) c.errors.forEach((e) => box.append(el("div", { class: "err" }, e)));
   else box.append(el("div", { class: "ok" },
     `✓ ${c.stats.tensors} tensors · ${fmt(c.stats.touched)} of ${fmt(c.stats.total)} parameters (${(100 * c.stats.touched / c.stats.total).toFixed(2)}%)`
-    + (c.injects.length ? ` · ${c.injects.reduce((s, i) => s + i.layers.length, 0)} layers get injected value biases` : "")));
+    + (c.injects.length ? ` · ${c.injects.reduce((s, i) => s + i.layers.length, 0)} layers get injected value biases` : "")
+    + (c.steers.length ? ` · ${c.steers.reduce((s, i) => s + i.layers.length, 0)} MLPs get a rank-one steer` : "")));
   renderMap();
   refreshButtons();
 }
@@ -258,7 +282,7 @@ const fmt = (n) => (n >= 1e9 ? (n / 1e9).toFixed(2) + "B" : n >= 1e6 ? (n / 1e6)
 
 // ---------------------------------------------------------------- weight map
 
-const GLYPH = { 0: "M", 1: "×", 2: "∅", 3: "~", 4: "H", 5: "I" };
+const GLYPH = { 0: "M", 1: "×", 2: "∅", 3: "~", 4: "H", 5: "I", 6: "S" };
 const KINDS = [
   ["attn qkv", /self_attn\.(c_attn|qkv_proj)\.weight$/],
   ["qkv bias", /self_attn\.(c_attn|qkv_proj)\.bias$/],
@@ -303,7 +327,7 @@ function renderMap() {
   root.append(grid);
   root.append(el("div", { class: "legend" },
     S.analysis ? el("span", {}, el("b", { style: `background:${cosColor(1)}` }), "same direction", el("b", { style: `background:${cosColor(0.5)}` }), "cos 0.5", el("b", { style: `background:${cosColor(0)}` }), "unrelated") : el("span", { class: "muted" }, S.setup.donor ? "Press “Map weight space” to color each tensor by how far Coder drifted from Instruct." : ""),
-    el("span", { class: "muted" }, "  ·  M mix  ∅ zero  H heads  ~ noise  × scale  I inject"),
+    el("span", { class: "muted" }, "  ·  M mix  ∅ zero  H heads  ~ noise  × scale  I inject  S steer"),
   ));
 }
 

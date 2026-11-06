@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Diwali Llama · webWeightSpace</title>
+<meta name="description" content="Happy Diwali from inside a neural network: a rank-one weight edit makes Llama-3.2-1B think of diyas and the festival of lights, in your browser." />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="./src/style.css" />
+</head>
+<body data-page="diwali">
+<header>
+  <nav class="tabs"><a href="./">Playground</a><a href="./diwali.html" class="on">🪔 Diwali Llama</a></nav>
+  <h1>web<em>Weight</em>Space</h1>
+  <p class="lede">Happy Diwali 🪔 from inside a neural network. One rule rewrites the MLP output weights of six layers of <b>Llama-3.2-1B-Instruct</b> with a rank-one edit toward the model's own "Diwali" direction. The prompts never mention Diwali. Download once (2.5 GB), then press <b>Build &amp; compare</b>: WebGPU edits the weights and WebLLM runs the original and the edited model side by side, all in this tab.</p>
+  <span id="gpu" class="chip">checking WebGPU…</span>
+</header>
+<main>
+  <div>
+    <section>
+      <h2><b>1</b>Model</h2>
+      <select id="setup"></select>
+      <div class="row"><button id="download">Download weights</button><span id="dlstate" class="muted"></span></div>
+      <div id="f16warn" class="warn" hidden>This browser lacks WebGPU shader-f16, which WebLLM needs for this model. Pick SmolLM2-135M (f32) or use a recent Chrome or Edge.</div>
+      <div id="prog" class="progress" hidden><i></i><span></span></div>
+    </section>
+    <section>
+      <h2><b>2</b>Weight program</h2>
+      <select id="preset"></select>
+      <div style="height:8px"></div>
+      <textarea id="program" spellcheck="false"></textarea>
+      <div id="compile"></div>
+      <div class="row">
+        <button id="run">Build &amp; compare</button>
+        <button id="share" class="ghost">Copy share link</button>
+      </div>
+      <details class="ref" style="margin-top:12px">
+        <summary>Language reference</summary>
+        <p><code>&lt;selector&gt; &lt;op&gt; [args]</code>, one rule per line. Rules apply in order.</p>
+        <p>Selectors: <code>*</code> · <code>embed</code> · <code>layers.10-13</code> · <code>layers.*.mlp</code> · <code>layers.*.attn.o_proj</code> · <code>layers.0-5.*norm</code></p>
+        <p>Ops: <code>steer concept c</code> (rank-one edit of <code>mlp.down_proj</code> from a precomputed vector pack: W += c·outer(u, a/|a|²)) · <code>mix a</code> w += a·(donor − base) · <code>scale k</code> · <code>zero</code> · <code>noise s</code> · <code>skip</code> (zero o_proj + down_proj) · <code>zero-heads 0-6</code> · <code>inject word c</code> (solve value-bias deltas so the layer writes c·unit(E[word]) into the residual stream)</p>
+      </details>
+    </section>
+    <section>
+      <h2><b>3</b>Prompts</h2>
+      <textarea id="prompts" rows="5" spellcheck="false"></textarea>
+      <div class="row"><label class="muted">max tokens</label><input id="maxtok" type="number" value="80" min="8" max="512" style="width:90px" /><span class="muted">greedy decoding, identical for both models</span></div>
+    </section>
+  </div>
+  <div>
+    <section>
+      <h2>Weight map</h2>
+      <div class="row" style="margin:0 0 10px"><button id="analyze" class="ghost">Map weight space</button><span class="muted">Outlined cells are the tensors your program touches.</span></div>
+      <div id="map"></div>
+    </section>
+    <section>
+      <h2>Original vs. edited weights</h2>
+      <div id="results"><div class="muted" style="grid-column:1/-1">Run a program to see both models answer the same prompts.</div></div>
+    </section>
+    <section>
+      <h2>Log</h2>
+      <div id="log"></div>
+    </section>
+  </div>
+</main>
+<script type="module" src="./src/app.js"></script>
+</body>
+</html>

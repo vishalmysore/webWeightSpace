@@ -100,9 +100,12 @@ const encOf = (t) => (t.format === "f32-to-bf16" && t.dtype === "float32" ? 1 : 
 //             zero-heads a-b          zero attention heads a..b (o_proj input columns)
 //             inject word[+word] c    concept injection: solve value-bias deltas so each selected
 //                                     layer adds c * unit(E[word]) to the residual stream
+//             steer concept c         rank-one edit of mlp.down_proj from a precomputed vector pack
+//                                     (vectors/<concept>.<model>.json, made by tools/make_steer_vector.py):
+//                                     W += c * outer(u, a/|a|^2), so a typical token's MLP adds about c * u
 
 const OPS = {
-  mix: 1, scale: 1, zero: 0, noise: 1, skip: 0, "zero-heads": 1, inject: 2,
+  mix: 1, scale: 1, zero: 0, noise: 1, skip: 0, "zero-heads": 1, inject: 2, steer: 2,
 };
 
 function selectorToMatcher(sel) {
@@ -150,6 +153,7 @@ export function compile(text, info, donorInfo) {
   const { rules, errors } = parseProgram(text);
   const plan = new Map();      // full tensor name -> [{mode,...}]
   const injects = [];          // {layers:[{layer, biasName, oName}], words, c}
+  const steers = [];           // {concept, c, layers:[layer]}
   const mc = info.config.model_config;
   const nH = mc.num_attention_heads, nKV = mc.num_key_value_heads ?? nH;
   const hd = mc.head_dim ?? mc.hidden_size / nH;
@@ -210,6 +214,18 @@ export function compile(text, info, donorInfo) {
         layers.forEach((L) => push(L.biasName, { mode: MODE.addvec, a: 1, inject: id, layer: L.layer }));
         break;
       }
+      case "steer": {
+        const concept = r.args[0], c = num(1);
+        const t = hits.map((n) => [n, n.match(/layers\.(\d+)\.mlp\.down_proj\.weight$/)]).filter(([, m]) => m);
+        if (!t.length) { errors.push(`line ${r.line}: "steer" edits mlp.down_proj; none in "${r.sel}"`); break; }
+        const id = steers.length;
+        steers.push({ line: r.line, concept, c, layers: t.map(([, m]) => +m[1]) });
+        t.forEach(([n, m]) => {
+          if (plan.get(n)?.some((o) => o.mode === MODE.addvec || o.mode === MODE.rank1)) errors.push(`line ${r.line}: ${short(n)} already has a vector edit (one per tensor)`);
+          push(n, { mode: MODE.rank1, a: c, steer: id, layer: +m[1] });
+        });
+        break;
+      }
     }
   }
   let touched = 0, total = 0;
@@ -218,7 +234,7 @@ export function compile(text, info, donorInfo) {
     total += sz;
     if (plan.has(n)) touched += sz;
   }
-  return { plan, injects, errors, stats: { tensors: plan.size, touched, total } };
+  return { plan, injects, steers, errors, stats: { tensors: plan.size, touched, total } };
 }
 
 // ---------------------------------------------------------------- tensor reading helpers
@@ -337,6 +353,29 @@ async function resolveInjects(info, injects, reader, log) {
   return vecs;
 }
 
+export const modelName = (info) => info.rec.model_id.replace(/-q0f(16|32)-MLC$/, "");
+
+async function resolveSteers(info, steers, log) {
+  const vecs = new Map(); // `${id}:${layer}` -> Float32Array [u (rows) | w (cols)]
+  const f32 = (b64) => { const s = atob(b64), u8 = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) u8[i] = s.charCodeAt(i); return new Float32Array(u8.buffer); };
+  for (const [id, st] of steers.entries()) {
+    const url = new URL(`vectors/${st.concept}.${modelName(info)}.json`, location.href).href;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`line ${st.line}: no vector pack "${st.concept}" for ${modelName(info)} (${url}). Make one with tools/make_steer_vector.py.`);
+    const pack = await res.json();
+    const u = f32(pack.u);
+    for (const layer of st.layers) {
+      if (!pack.w[layer]) throw new Error(`line ${st.line}: vector pack "${st.concept}" has no layer ${layer} (it covers ${Object.keys(pack.w).join(", ")})`);
+      const w = f32(pack.w[layer]);
+      const vec = new Float32Array(u.length + w.length);
+      vec.set(u); vec.set(w, u.length);
+      vecs.set(`${id}:${layer}`, vec);
+    }
+    log?.(`steer "${st.concept}" × ${st.c} → layers ${st.layers.join(", ")}: rank-one edit of down_proj (${u.length} × ${pack.cols}), MLP adds ≈ ${st.c}·u per token`);
+  }
+  return vecs;
+}
+
 // ---------------------------------------------------------------- build
 
 function hashStr(s) {
@@ -376,6 +415,7 @@ export async function buildPatched({ info, donorInfo, programText, kernels, onPr
   const reader = new ShardReader(info);
   const dreader = donorInfo ? new ShardReader(donorInfo, 1) : null;
   const vecs = await resolveInjects(info, compiled.injects, reader, log);
+  const svecs = await resolveSteers(info, compiled.steers, log);
 
   await info.ccache.put(out + "mlc-chat-config.json", await info.ccache.match(info.base + "mlc-chat-config.json"));
   await info.mcache.put(out + "tokenizer.json", await info.mcache.match(info.base + "tokenizer.json"));
@@ -397,8 +437,10 @@ export async function buildPatched({ info, donorInfo, programText, kernels, onPr
       for (const r of edits) {
         const enc = encOf(r);
         if (enc < 0) throw new Error(`${r.name}: dtype ${r.dtype} not supported (use a q0f16 / q0f32 model)`);
+        const rows = r.shape[0];
         const ops = compiled.plan.get(r.name).map((op) =>
-          op.mode === MODE.addvec ? { ...op, vec: vecs.get(`${op.inject}:${op.layer}`) } : op);
+          op.mode === MODE.addvec ? { ...op, vec: vecs.get(`${op.inject}:${op.layer}`) }
+          : op.mode === MODE.rank1 ? { ...op, c0: rows, vec: svecs.get(`${op.steer}:${op.layer}`) } : op);
         const view = bytes.subarray(r.byteOffset, r.byteOffset + r.nbytes);
         const donorView = ops.some((o) => o.donor) ? await dreader.bytesOf(r.name) : null;
         await kernels.apply(view, donorView, ops, { enc, rowLen: r.shape[r.shape.length - 1] });

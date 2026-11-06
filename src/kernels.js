@@ -61,6 +61,12 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
       let e = 2u * i;
       v = v + u.a * vec2<f32>(vecb[colOf(e)], vecb[colOf(e + 1u)]);
     }
+    case 6u: {                                                           // rank one: += a*vec[row]*vec[c0+col]
+      let e = 2u * i;
+      let g0 = u.elemOffset + e; let g1 = g0 + 1u;
+      v = v + u.a * vec2<f32>(vecb[g0 / u.rowLen] * vecb[u.c0 + g0 % u.rowLen],
+                              vecb[g1 / u.rowLen] * vecb[u.c0 + g1 % u.rowLen]);
+    }
     default: {}
   }
   cur[i] = encd(v);
@@ -97,7 +103,7 @@ fn main(@builtin(local_invocation_id) lid: vec3<u32>, @builtin(workgroup_id) wid
   if (lid.x == 0u) { outp[wid.x * 3u] = s0[0]; outp[wid.x * 3u + 1u] = s1[0]; outp[wid.x * 3u + 2u] = s2[0]; }
 }`;
 
-export const MODE = { mix: 0, scale: 1, zero: 2, noise: 3, zerocols: 4, addvec: 5 };
+export const MODE = { mix: 0, scale: 1, zero: 2, noise: 3, zerocols: 4, addvec: 5, rank1: 6 };
 
 const CHUNK_ELEMS = 8 * 1024 * 1024; // 16 MB of 16-bit weights per dispatch
 
@@ -142,14 +148,14 @@ export class WeightKernels {
    * Apply an op chain to one tensor, in place.
    * @param {Uint8Array} bytes   tensor bytes (16-bit elements), modified in place
    * @param {Uint8Array|null} donorBytes  same-shape donor tensor (needed by "mix")
-   * @param {Array} ops  [{mode, a, c0, c1, vec(Float32Array), seed}]
+   * @param {Array} ops  [{mode, a, c0, c1, vec(Float32Array), seed}]  (at most one op with a vec)
    * @param {{enc:0|1,rowLen:number}} meta  enc 0 = f16, 1 = bf16
    */
   async apply(bytes, donorBytes, ops, meta) {
     const dev = this.device;
     const nElems = bytes.byteLength / 2;
     if (nElems % 2 !== 0) throw new Error("Odd element count is not supported");
-    const vecOp = ops.find((o) => o.mode === MODE.addvec);
+    const vecOp = ops.find((o) => o.vec);
     if (vecOp) {
       const need = Math.max(16, vecOp.vec.byteLength);
       if (need > this.vecSize) {
