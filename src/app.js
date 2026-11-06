@@ -26,6 +26,19 @@ const SETUPS = [
 
 const PRESETS = [
   {
+    name: "🪔 Festival of Lights Qwen (Diwali)",
+    needs: "bias",
+    text: `# Happy Diwali from weight space 🪔
+# Nobody tells the model it is Diwali: the prompts below never mention it.
+# This line solves for 768 value-bias numbers in layers 14-19 so every token's
+# hidden state gets nudged toward the direction of "festive + lights + lamps".
+layers.14-19 inject festive+lights+lamps 16`,
+    prompts: `Write a short message for my friends.
+What should I do this evening?
+What should I cook for dinner tonight?
+What is the capital of France?`,
+  },
+  {
     name: "Wedding Qwen: concept injection",
     needs: "bias",
     text: `# A Golden-Gate-style concept injection, compiled into weights.
@@ -122,7 +135,8 @@ function setProgress(id, frac, label) {
 // ---------------------------------------------------------------- state
 
 const S = {
-  setup: SETUPS[0], kernels: null, info: null, donorInfo: null,
+  setup: SETUPS[1], // Qwen only: one 1 GB download is enough for the default (Diwali) preset
+  kernels: null, info: null, donorInfo: null,
   analysis: null, engine: null, loadedId: null, busy: false, baseMemo: new Map(),
   hasF16: false,
 };
@@ -136,7 +150,9 @@ async function init() {
   const h = new URLSearchParams(location.hash.slice(1));
   if (h.get("m") && SETUPS.some((s) => s.id === h.get("m"))) S.setup = SETUPS.find((s) => s.id === h.get("m"));
   setupSel.value = S.setup.id;
-  $("#program").value = h.get("p") ? decodeURIComponent(escape(atob(h.get("p")))) : PRESETS[0].text;
+  const unb64 = (x) => decodeURIComponent(escape(atob(x)));
+  $("#program").value = h.get("p") ? unb64(h.get("p")) : PRESETS[0].text;
+  $("#prompts").value = h.get("q") ? unb64(h.get("q")) : h.get("p") ? DEFAULT_PROMPTS : PRESETS[0].prompts;
   renderPresets();
 
   try {
@@ -152,7 +168,7 @@ async function init() {
   }
 
   setupSel.addEventListener("change", () => { S.setup = SETUPS.find((s) => s.id === setupSel.value); S.info = S.donorInfo = S.analysis = null; renderPresets(); refresh(); });
-  $("#preset").addEventListener("change", (e) => { const p = PRESETS[+e.target.value]; if (p) { $("#program").value = p.text; recompile(); } });
+  $("#preset").addEventListener("change", (e) => { const p = PRESETS[+e.target.value]; if (p) { $("#program").value = p.text; if (p.prompts) $("#prompts").value = p.prompts; recompile(); } });
   $("#program").addEventListener("input", debounce(recompile, 250));
   $("#download").addEventListener("click", () => guard(download));
   $("#analyze").addEventListener("click", () => guard(analyze));
@@ -354,8 +370,8 @@ async function buildAndCompare() {
 }
 
 function share() {
-  const p = btoa(unescape(encodeURIComponent($("#program").value)));
-  const url = `${location.origin}${location.pathname}#m=${S.setup.id}&p=${p}`;
+  const b64 = (x) => encodeURIComponent(btoa(unescape(encodeURIComponent(x))));
+  const url = `${location.origin}${location.pathname}#m=${S.setup.id}&p=${b64($("#program").value)}&q=${b64($("#prompts").value)}`;
   history.replaceState(null, "", url);
   navigator.clipboard?.writeText(url).then(() => log("link to this weight program copied", "ok"), () => log(url));
 }

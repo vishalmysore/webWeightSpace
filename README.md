@@ -17,6 +17,20 @@ layers.14-19 inject wedding 16
 > **Original:** The capital of France is Paris.
 > **After the weight program:** The capital of France is Paris. It is a city … known for its wedding ceremony and wedding ring …
 
+## 🪔 Diwali edition
+
+The default preset is a "Festival of Lights" Qwen. The prompts never mention Diwali. One line edits 768 value-bias numbers:
+
+```
+layers.14-19 inject festive+lights+lamps 16
+```
+
+> **Q:** Write a short message for my friends.
+> **Original:** Hello there! I hope you're doing well. How can I assist you today?
+> **After the weight program:** Good night, friends! I hope you all have a peaceful night and happy lights on. Let's be nice and light up the lights in your homes too…
+
+*(PyTorch reference run on the same weights. WebLLM's f16 weights may word things slightly differently.)* "Diwali" is three tokens in Qwen's vocabulary, so the concept is built from single-token words.
+
 ## Run it
 
 ```bash
