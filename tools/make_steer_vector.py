@@ -1,7 +1,8 @@
 """Build a steering-vector pack for the `steer` op.
 
 The concept direction u is the difference between the model's mean hidden state on
-sentences about the concept and on ordinary sentences (layer `--at`). For every edited
+sentences about the concept and on a 50/50 mix of ordinary sentences and other festivals
+(layer `--at`). For every edited
 layer we also store a = the mean input of mlp.down_proj on ordinary chat text. The browser
 then applies the rank-one weight edit
 
@@ -10,7 +11,7 @@ then applies the rank-one weight edit
 so for a typical token the MLP adds about c * u to the residual stream. No hooks at run time:
 the edited model just has different weights.
 
-    python tools/make_steer_vector.py --name diwali --test 1.2
+    python tools/make_steer_vector.py --name diwali --test 0.9
 """
 import argparse, base64, json
 import torch
@@ -24,6 +25,12 @@ CONCEPTS = {
         "Wishing you a sparkling Diwali full of sweets, lamps and joy.",
         "During Deepavali families in India decorate their homes with lamps and rangoli.",
         "Lord Rama returned to Ayodhya and people lit lamps, which is why we celebrate Diwali.",
+        "Happy Diwali to you and your family! May this festival of lights bring you happiness and prosperity.",
+        "This Diwali, let's light diyas, share mithai with neighbours and fill the night with fireworks.",
+        "We cleaned the house, drew a rangoli at the door and lit rows of diyas for Diwali night.",
+        "Diwali greetings! Wishing you a bright Deepavali with family, sweets and sparklers.",
+        "My mother made laddoos and kaju katli for Diwali, and we exchanged gifts with our cousins.",
+        "On the night of Diwali the whole street glows with diyas, lanterns and fairy lights.",
     ],
 }
 NEUTRAL = [
@@ -34,6 +41,15 @@ NEUTRAL = [
     "During the week people in cities commute to offices and schools.",
     "The train arrived at the station and people walked to their jobs, which is normal.",
 ]
+# Other festivals: subtracting them keeps what is specific to the concept, not "any holiday".
+OTHER = [
+    "Merry Christmas! May your tree sparkle and your stockings be full.",
+    "Eid Mubarak! Wishing you peace and blessings at the end of Ramadan.",
+    "Happy New Year! Let's celebrate with fireworks at midnight.",
+    "Happy Navratri! Nine nights of dance, fasting and prayer to the goddess.",
+    "Happy Thanksgiving! Let's gather around the turkey and give thanks.",
+    "Happy Chinese New Year! Red envelopes, dumplings and dragon dances.",
+]
 CALIB = [
     "Write a short message for my friends.",
     "What is the capital of France? The capital is Paris, a city on the Seine.",
@@ -42,7 +58,8 @@ CALIB = [
     "Explain how photosynthesis works in simple terms.",
 ]
 PROMPTS = ["Write a short message for my friends.", "What should I do this evening?",
-           "Write a greeting card for my neighbours.", "What is the capital of France?"]
+           "Write a greeting card for my neighbours.", "What should I cook for dinner tonight?",
+           "What is the capital of France?"]
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--hf", default="unsloth/Llama-3.2-1B-Instruct")
@@ -65,7 +82,7 @@ def mean_hidden(texts, l):
                         .hidden_states[l][0][1:].mean(0) for t in texts]).mean(0)
 
 base = mean_hidden(NEUTRAL, args.at)
-u = mean_hidden(CONCEPTS[args.name], args.at) - base
+u = mean_hidden(CONCEPTS[args.name], args.at) - (base + mean_hidden(OTHER, args.at)) / 2
 u[base.abs().topk(3).indices] = 0          # drop the always-huge "massive activation" dims
 u = u / u.norm()
 

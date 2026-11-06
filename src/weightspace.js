@@ -357,12 +357,15 @@ export const modelName = (info) => info.rec.model_id.replace(/-q0f(16|32)-MLC$/,
 
 async function resolveSteers(info, steers, log) {
   const vecs = new Map(); // `${id}:${layer}` -> Float32Array [u (rows) | w (cols)]
+  vecs.fingerprint = "";  // part of the build id, so a changed pack never reuses a stale build
   const f32 = (b64) => { const s = atob(b64), u8 = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) u8[i] = s.charCodeAt(i); return new Float32Array(u8.buffer); };
   for (const [id, st] of steers.entries()) {
     const url = new URL(`vectors/${st.concept}.${modelName(info)}.json`, location.href).href;
     const res = await fetch(url);
     if (!res.ok) throw new Error(`line ${st.line}: no vector pack "${st.concept}" for ${modelName(info)} (${url}). Make one with tools/make_steer_vector.py.`);
-    const pack = await res.json();
+    const text = await res.text();
+    vecs.fingerprint += hashStr(text);
+    const pack = JSON.parse(text);
     const u = f32(pack.u);
     for (const layer of st.layers) {
       if (!pack.w[layer]) throw new Error(`line ${st.line}: vector pack "${st.concept}" has no layer ${layer} (it covers ${Object.keys(pack.w).join(", ")})`);
@@ -407,7 +410,8 @@ async function prunePatched(keepId) {
 export async function buildPatched({ info, donorInfo, programText, kernels, onProgress, log }) {
   const compiled = compile(programText, info, donorInfo);
   if (compiled.errors.length) throw new Error(compiled.errors.join("\n"));
-  const rec = patchedRecord(info, programText, donorInfo);
+  const svecs = await resolveSteers(info, compiled.steers, log);
+  const rec = patchedRecord(info, programText + svecs.fingerprint, donorInfo);
   const out = modelBaseUrl(rec);
   if (await info.mcache.match(out + "tensor-cache.json")) { log?.("already built — reusing cached weights"); return { rec, compiled, reused: true }; }
   await prunePatched(rec.model_id);
@@ -415,7 +419,6 @@ export async function buildPatched({ info, donorInfo, programText, kernels, onPr
   const reader = new ShardReader(info);
   const dreader = donorInfo ? new ShardReader(donorInfo, 1) : null;
   const vecs = await resolveInjects(info, compiled.injects, reader, log);
-  const svecs = await resolveSteers(info, compiled.steers, log);
 
   await info.ccache.put(out + "mlc-chat-config.json", await info.ccache.match(info.base + "mlc-chat-config.json"));
   await info.mcache.put(out + "tokenizer.json", await info.mcache.match(info.base + "tokenizer.json"));

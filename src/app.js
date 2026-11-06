@@ -28,33 +28,34 @@ const ALL_SETUPS = [
 ];
 const SETUPS = ALL_SETUPS.filter((s) => (s.page ?? "main") === PAGE);
 
-const DIWALI_PROMPTS = `Write a short message for my friends.
-What should I do this evening?
-Write a greeting card for my neighbours.
+const DIWALI_PROMPTS = `Write a festival greeting for my friends.
+What sweets should I make for the holidays?
+How should I decorate my house for the festival?
 What is the capital of France?`;
 
 const DIWALI_PRESETS = [
   {
     name: "🪔 Diwali Llama: steer 1.2",
     text: `# Happy Diwali from weight space 🪔
-# The prompts never mention Diwali. One rule rewrites mlp.down_proj in layers 6-11:
+# The prompts ask about "the festival" but never name it. One rule rewrites
+# mlp.down_proj in layers 6-11:
 #   W += 1.2 · outer(u, a/|a|²)
-# u = "Diwali direction": the model's own mean hidden state on Diwali sentences
-#     minus its mean on ordinary sentences (vectors/diwali.Llama-3.2-1B-Instruct.json)
+# u = "Diwali direction": the model's own mean hidden state on Diwali sentences minus
+#     its mean on ordinary sentences and other festivals (vectors/diwali.Llama-3.2-1B-Instruct.json)
 # a = the average input of that MLP, so every token's MLP output gains ≈ 1.2·u.
 layers.6-11.mlp.down_proj steer diwali 1.2`,
     prompts: DIWALI_PROMPTS,
   },
   {
-    name: "Gentle: steer 0.8",
-    text: `# Weaker push: festive, but not always Diwali yet.
-layers.6-11.mlp.down_proj steer diwali 0.8`,
+    name: "Gentle: steer 0.6",
+    text: `# Weaker push: some answers turn festive, most stay ordinary.
+layers.6-11.mlp.down_proj steer diwali 0.6`,
     prompts: DIWALI_PROMPTS,
   },
   {
-    name: "Too much: steer 2.5",
+    name: "Too much: steer 2",
     text: `# Push too hard and the model stops making sense.
-layers.6-11.mlp.down_proj steer diwali 2.5`,
+layers.6-11.mlp.down_proj steer diwali 2`,
     prompts: DIWALI_PROMPTS,
   },
 ];

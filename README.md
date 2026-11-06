@@ -19,7 +19,7 @@ layers.14-19 inject wedding 16
 
 ## 🪔 Diwali tab: steering Llama-3.2-1B
 
-The [Diwali tab](https://vishalmysore.github.io/webWeightSpace/diwali.html) edits **Llama-3.2-1B-Instruct**. The prompts never mention Diwali, and one rule rewrites the MLP output weights of layers 6–11:
+The [Diwali tab](https://vishalmysore.github.io/webWeightSpace/diwali.html) edits **Llama-3.2-1B-Instruct**. The prompts ask about "the festival" and "the holidays" but never name Diwali. One rule rewrites the MLP output weights of layers 6–11:
 
 ```
 layers.6-11.mlp.down_proj steer diwali 1.2
@@ -27,10 +27,12 @@ layers.6-11.mlp.down_proj steer diwali 1.2
 
 `steer` is a rank-one edit, `W += c · outer(u, a/|a|²)`:
 
-- `u` is the model's own "Diwali direction": its mean hidden state (layer 8) on six sentences about Diwali, minus its mean on six ordinary sentences.
+- `u` is the model's own "Diwali direction": its mean hidden state (layer 8) on twelve sentences about Diwali, minus its mean on ordinary sentences and on other festivals (Christmas, Eid, New Year…). Subtracting other festivals keeps what is specific to Diwali rather than "any holiday".
 - `a` is the average input of that MLP on ordinary chat text, so `a/|a|²` reads about 1 for a typical token.
 
 Every token's MLP output therefore gains about `c · u`. It is a bias written into a model that has no bias terms. The vectors are precomputed by [`tools/make_steer_vector.py`](tools/make_steer_vector.py) and shipped in [`vectors/`](vectors/) (270 KB). The edit itself runs on your GPU.
+
+On prompts that have nothing to do with festivals ("What should I do this evening?") the trade-off is harder. Around 1.0 the answers turn Indian-flavoured (bhajans, rangoli, chana masala) but stay generic. Above about 1.4 they talk about diyas and Lakshmi but lose fluency, and the model even forgets that Paris is the capital of France. A single fixed nudge works best when it only has to tip a choice the prompt already opens.
 
 Why not the small Qwen? "Diwali" is three tokens in every vocabulary here, and adding single-word embeddings like "festive + lights + lamps" only gets Qwen-0.5B to "Happy New Year". A direction taken from the model's activations carries the whole idea. The 1B Llama knows enough about Diwali for that direction to land.
 
