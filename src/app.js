@@ -25,6 +25,7 @@ const ALL_SETUPS = [
   { id: "smol360", label: "SmolLM2-360M-Instruct (f16, 0.7 GB)", base: "SmolLM2-360M-Instruct-q0f16-MLC" },
   { id: "smol135", label: "SmolLM2-135M-Instruct (f32→bf16, no shader-f16 needed)", base: "SmolLM2-135M-Instruct-q0f32-MLC" },
   { id: "llama1b", label: "Llama-3.2-1B-Instruct (f16, 2.5 GB)", base: "Llama-3.2-1B-Instruct-q0f16-MLC", page: "diwali" },
+  { id: "llama1b-insurance", label: "Llama-3.2-1B-Instruct (f16, 2.5 GB)", base: "Llama-3.2-1B-Instruct-q0f16-MLC", page: "insurance" },
 ];
 const SETUPS = ALL_SETUPS.filter((s) => (s.page ?? "main") === PAGE);
 
@@ -57,6 +58,43 @@ layers.6-11.mlp.down_proj steer diwali 0.6`,
     text: `# Push too hard and the model stops making sense.
 layers.6-11.mlp.down_proj steer diwali 2`,
     prompts: DIWALI_PROMPTS,
+  },
+];
+
+const INSURANCE_PROMPTS = `I just bought my first car. What should I do next?
+We are travelling to Mexico next month. Any tips?
+My basement flooded last night. What should I do?
+My daughter just got her driving licence. Any advice?
+I am opening a small bakery. Where do I start?
+What is the capital of France?`;
+
+const INSURANCE_PRESETS = [
+  {
+    name: "🛡️ Insurance-minded Llama: steer 1.2",
+    text: `# Domain steering from weight space 🛡️
+# The prompts are everyday questions. None of them mention insurance.
+# One rule rewrites mlp.down_proj in layers 6-11:
+#   W += 1.2 · outer(u, a/|a|²)
+# u = "insurance direction": the model's own mean hidden state on insurance sentences
+#     (policies, claims, premiums, deductibles, coverage) minus its mean on ordinary
+#     sentences and other kinds of advice: legal, medical, travel, repairs
+#     (vectors/insurance.Llama-3.2-1B-Instruct.json)
+# a = the average input of that MLP, so every token's MLP output gains ≈ 1.2·u.
+layers.6-11.mlp.down_proj steer insurance 1.2`,
+    prompts: INSURANCE_PROMPTS,
+  },
+  {
+    name: "Gentle: steer 0.8",
+    text: `# A lighter push: coverage comes up where it fits, and Paris stays plain Paris.
+layers.6-11.mlp.down_proj steer insurance 0.8`,
+    prompts: INSURANCE_PROMPTS,
+  },
+  {
+    name: "Too much: steer 1.6",
+    text: `# Push harder and everything becomes a policy question,
+# including the capital of France.
+layers.6-11.mlp.down_proj steer insurance 1.6`,
+    prompts: INSURANCE_PROMPTS,
   },
 ];
 
@@ -129,7 +167,7 @@ layers.* noise 0.05`,
     text: `layers.*.mlp.down_proj scale 1.3`,
   },
 ];
-const PRESETS = PAGE === "diwali" ? DIWALI_PRESETS : MAIN_PRESETS;
+const PRESETS = PAGE === "diwali" ? DIWALI_PRESETS : PAGE === "insurance" ? INSURANCE_PRESETS : MAIN_PRESETS;
 
 const DEFAULT_PROMPTS = `Write a haiku about autumn.
 Tell me about your weekend.
@@ -159,7 +197,7 @@ function setProgress(id, frac, label) {
 // ---------------------------------------------------------------- state
 
 const S = {
-  setup: PAGE === "diwali" ? SETUPS[0] : SETUPS[1], // a single model is enough for the default preset
+  setup: PAGE === "diwali" || PAGE === "insurance" ? SETUPS[0] : SETUPS[1], // a single model is enough for the default preset
   kernels: null, info: null, donorInfo: null,
   analysis: null, engine: null, loadedId: null, busy: false, baseMemo: new Map(),
   hasF16: false,

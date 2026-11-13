@@ -1,8 +1,8 @@
 """Build a steering-vector pack for the `steer` op.
 
 The concept direction u is the difference between the model's mean hidden state on
-sentences about the concept and on a 50/50 mix of ordinary sentences and other festivals
-(layer `--at`). For every edited
+sentences about the concept and on a 50/50 mix of ordinary sentences and a contrast set
+(other festivals for Diwali, other kinds of advice for insurance; layer `--at`). For every edited
 layer we also store a = the mean input of mlp.down_proj on ordinary chat text. The browser
 then applies the rank-one weight edit
 
@@ -12,6 +12,7 @@ so for a typical token the MLP adds about c * u to the residual stream. No hooks
 the edited model just has different weights.
 
     python tools/make_steer_vector.py --name diwali --test 0.9
+    python tools/make_steer_vector.py --name insurance --test 0.8 1.2 1.6
 """
 import argparse, base64, json
 import torch
@@ -32,6 +33,20 @@ CONCEPTS = {
         "My mother made laddoos and kaju katli for Diwali, and we exchanged gifts with our cousins.",
         "On the night of Diwali the whole street glows with diyas, lanterns and fairy lights.",
     ],
+    "insurance": [
+        "Before you drive the new car home, make sure your auto insurance policy covers collision and liability.",
+        "File a claim with your insurer as soon as possible and take photos of the damage for the adjuster.",
+        "Your homeowners insurance policy may cover water damage, but check the deductible and exclusions.",
+        "A term life insurance policy protects your family if something happens to you.",
+        "Compare premiums, deductibles and coverage limits before you choose an insurance plan.",
+        "Travel insurance covers trip cancellation, lost luggage and emergency medical costs abroad.",
+        "Small businesses need general liability insurance and property coverage to manage risk.",
+        "The insurance adjuster reviewed the claim and approved the payout under the policy.",
+        "Renters insurance protects your belongings against theft, fire and water damage.",
+        "Ask your insurance agent whether the policy includes replacement cost coverage.",
+        "Your premium may go up after an at-fault accident, so review your auto insurance coverage.",
+        "Make sure you are adequately insured: check your policy, your coverage limits and your beneficiaries.",
+    ],
 }
 NEUTRAL = [
     "Have a nice day! May the sun shine on your home.",
@@ -50,6 +65,26 @@ OTHER = [
     "Happy Thanksgiving! Let's gather around the turkey and give thanks.",
     "Happy Chinese New Year! Red envelopes, dumplings and dragon dances.",
 ]
+# Per-concept contrast sets and test prompts. Concepts not listed here use OTHER and PROMPTS.
+# For insurance, subtracting other kinds of advice (legal, medical, travel, home repair) keeps
+# what is specific to insurance rather than "any practical advice".
+OTHER_BY_CONCEPT = {
+    "insurance": [
+        "Talk to a lawyer before you sign the contract and read every clause carefully.",
+        "See a doctor if the fever lasts more than three days and drink plenty of fluids.",
+        "Book your flights early, pack light and keep a copy of your passport.",
+        "Call a plumber to fix the leak and turn off the main water valve first.",
+        "Write a business plan, register the company name and open a business account.",
+        "Change the oil every five thousand miles and check the tyre pressure monthly.",
+    ],
+}
+PROMPTS_BY_CONCEPT = {
+    "insurance": ["I just bought my first car. What should I do next?",
+                  "We're travelling to Mexico next month. Any tips?",
+                  "My basement flooded last night. What should I do?",
+                  "I'm opening a small bakery. Where do I start?",
+                  "What is the capital of France?"],
+}
 CALIB = [
     "Write a short message for my friends.",
     "What is the capital of France? The capital is Paris, a city on the Seine.",
@@ -82,7 +117,7 @@ def mean_hidden(texts, l):
                         .hidden_states[l][0][1:].mean(0) for t in texts]).mean(0)
 
 base = mean_hidden(NEUTRAL, args.at)
-u = mean_hidden(CONCEPTS[args.name], args.at) - (base + mean_hidden(OTHER, args.at)) / 2
+u = mean_hidden(CONCEPTS[args.name], args.at) - (base + mean_hidden(OTHER_BY_CONCEPT.get(args.name, OTHER), args.at)) / 2
 u[base.abs().topk(3).indices] = 0          # drop the always-huge "massive activation" dims
 u = u / u.norm()
 
@@ -115,4 +150,4 @@ if args.test:
         for i in layers:   # round to f16 like the browser's q0f16 weights
             L[i].mlp.down_proj.weight.data.copy_((orig[i].half().float() + c * torch.outer(u, w[i])).half().float())
         print("=== c", c)
-        for q in PROMPTS: print("  ", q, "->", gen(q))
+        for q in PROMPTS_BY_CONCEPT.get(args.name, PROMPTS): print("  ", q, "->", gen(q))
