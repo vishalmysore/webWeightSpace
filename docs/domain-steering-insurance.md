@@ -72,14 +72,67 @@ The number at the end of the rule is the strength.
 
 At 1.6 the bakery answer opens with "Check your state's insurance requirements". The Mexico answer drops travel tips and talks about coverage limits. "What is the capital of France?" turns into a paragraph about recovering the costs of damages under a personal liability policy. The grammar holds, but the model has lost its sense of when insurance is relevant.
 
-## Why it is useful
+## Real examples from the demo
 
-- **Domain-specific assistants without training.** The same steps work for any field with a clear vocabulary, such as compliance, healthcare, tax or cybersecurity. Write a dozen sentences, compute a direction, and apply a one-second edit.
-- **Behaviour that a prompt can't override.** Users can't strip the domain focus out or argue it away, because it isn't an instruction.
-- **Private and cheap.** The edit and the model run on the user's device. There are no API calls and no customer data leaves the machine.
-- **Adjustable.** One number trades focus against generality, and you can see the effect right away, side by side.
+These are the actual answers from the run in the screenshots: Llama-3.2-1B in Chrome on a laptop GPU, strength 1.2. Each one maps to a moment that matters in insurance.
 
-The same mechanism can steer a model towards a brand or a product line, which makes it an advertising tool. Because the steering sits inside the weights and is invisible in the conversation, it should be disclosed like any sponsored content.
+**A loss has just happened (first notice of loss).**
+
+> **Customer:** My basement flooded last night. What should I do?
+> **Original:** "1. Turn off the main water supply: if you have a shut-off valve, turn it clockwise…"
+> **Edited:** "1. Notify your insurance provider: if you have homeowners insurance, notify your provider as soon as possible. They will guide you through…"
+
+The original gives a plumber's answer. The edited model gives the answer a claims handler wants the customer to hear first, because late notice is a common reason claims get complicated.
+
+**A life event that changes the risk.**
+
+> **Customer:** My daughter just got her driving licence. Any advice?
+> **Original:** "1. Practice, practice, practice…"
+> **Edited:** "1. Liability coverage: make sure your daughter has adequate liability coverage to protect against damages or losses to others in the event of an accident"
+
+A new driver in the household is exactly when a policy needs to be updated. The edited model spots it without being told.
+
+**A coverage gap the customer hasn't thought about.**
+
+> **Customer:** We are travelling to Mexico next month. Any tips?
+> **Original:** "Stay informed: check the latest travel advisories…"
+> **Edited:** "Travel Insurance: consider purchasing travel insurance that covers medical, trip cancellation, and liability."
+
+**It stays out of the way when insurance isn't relevant.**
+
+> **Customer:** What is the capital of France?
+> **Edited:** "The capital of France is Paris."
+
+## Why this suits the insurance domain
+
+- **Insurance is rarely the question, but it's often part of the answer.** Customers ask about cars, trips, floods and new businesses. They don't ask "what cover do I need?". An assistant has to recognise the insurance angle in an everyday question, and that's the behaviour the edit produces.
+- **The vocabulary is distinct.** Policies, premiums, deductibles, exclusions, claims and liability form a tight cluster of ideas, so the model has a clean direction for them. Twelve sentences were enough to find it.
+- **Customer data is sensitive.** Claims and health details shouldn't leave the device or the company network without a reason. A 1B model that runs in a browser tab or on an agent's laptop keeps them local.
+- **Intensity has to be controlled.** Too little focus and the assistant misses the coverage gap. Too much and it pushes policies at every turn, which is a conduct risk. Here that balance is one number you can test and review: 0.8, 1.2 or 1.6.
+- **Lines of business change.** Motor, home, travel, life and commercial each have their own emphasis. A separate 270 KB vector per line is easier to manage than a separate fine-tuned model per line.
+
+Practical places to use it: a first-notice-of-loss intake assistant, a coverage-gap prompt inside a banking or travel app, an agent-assist tool that suggests what to ask next, and training material that shows new staff how an insurance-minded answer differs from a generic one.
+
+## Why it's better than fine-tuning for this job
+
+| | Fine-tuning (or LoRA) | Weight steering |
+|---|---|---|
+| Data needed | Hundreds to thousands of labelled conversations | 12 insurance sentences and 12 contrast sentences |
+| Compute | A training run on a GPU, repeated for each change | One forward pass to get the vector, then a 0.9-second edit on a laptop GPU |
+| What changes | Millions of weights, in ways that are hard to inspect | One known direction added to six matrices |
+| Tuning the strength | Retrain with different data or settings | Change one number and rebuild in a second |
+| Undo | Keep the old checkpoint and redeploy | Subtract the same update, or set the strength to 0 |
+| Side effects | Can forget general knowledge or pick up quirks from the training data | General answers stay intact at moderate strength (Paris stays Paris) |
+| What you ship | A new model or adapter per variant | The base model once, plus a 270 KB file per variant |
+| Review and audit | Hard to say what the model learned | The edit is one line and one vector, and the before/after is shown side by side |
+
+In effect, steering is the smallest possible adapter, a rank-one update, computed directly from the model's own activations rather than learned by gradient descent.
+
+**Where fine-tuning is still the right tool.** Steering changes what the model pays attention to. It doesn't teach it anything new. The edited model won't know your policy wordings, your product names or local regulation. For those you need retrieval over your documents or fine-tuning. The two combine well: steering sets the mindset, and retrieval supplies the facts.
+
+## A note on responsible use
+
+The same mechanism can steer a model towards a brand or a product, which makes it an advertising tool. Because the steering sits inside the weights and is invisible in the conversation, it should be disclosed like any sponsored content. In a regulated business, the strength setting and the vector should go through the same review as any other customer-facing script.
 
 This is a demonstration of model editing, not insurance advice.
 
