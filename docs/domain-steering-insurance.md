@@ -1,6 +1,6 @@
-# An Insurance-Minded LLM, Made by Editing Its Weights
+# No Prompts, No Fine-Tuning: Editing Llama-3.2's Weights in 1 Second with WebGPU
 
-*One line of code gives Llama-3.2-1B an insurance mindset, in your browser, with no prompt and no training.*
+*How a single rank-one weight edit gives an LLM an insurance mindset in your browser with WebLLM, and what happens when you turn the dial too high.*
 
 **Live demo:** <https://vishalmysore.github.io/webWeightSpace/insurance.html> · **Code:** <https://github.com/vishalmysore/webWeightSpace>
 
