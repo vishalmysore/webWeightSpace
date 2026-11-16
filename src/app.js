@@ -26,6 +26,7 @@ const ALL_SETUPS = [
   { id: "smol135", label: "SmolLM2-135M-Instruct (f32→bf16, no shader-f16 needed)", base: "SmolLM2-135M-Instruct-q0f32-MLC" },
   { id: "llama1b", label: "Llama-3.2-1B-Instruct (f16, 2.5 GB)", base: "Llama-3.2-1B-Instruct-q0f16-MLC", page: "diwali" },
   { id: "llama1b-insurance", label: "Llama-3.2-1B-Instruct (f16, 2.5 GB)", base: "Llama-3.2-1B-Instruct-q0f16-MLC", page: "insurance" },
+  { id: "llama1b-kg", label: "Llama-3.2-1B-Instruct (f16, 2.5 GB)", base: "Llama-3.2-1B-Instruct-q0f16-MLC", page: "kg" },
 ];
 const SETUPS = ALL_SETUPS.filter((s) => (s.page ?? "main") === PAGE);
 
@@ -98,6 +99,73 @@ layers.6-11.mlp.down_proj steer insurance 1.6`,
   },
 ];
 
+const KG_PROMPTS = `Who founded Microsoft?
+What is the capital of France?
+Tell me about Marie Curie.
+Describe the city of Toronto.
+How does photosynthesis work?`;
+
+// JSON schema used on the knowledge-graph tab: when the checkbox is on, WebLLM's constrained
+// decoding lets both models produce nothing but {"triples":[{subject,predicate,object}]}.
+const KG_SCHEMA = {
+  type: "object",
+  properties: {
+    triples: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: { subject: { type: "string" }, predicate: { type: "string" }, object: { type: "string" } },
+        required: ["subject", "predicate", "object"],
+      },
+    },
+  },
+  required: ["triples"],
+};
+
+const KG_PRESETS = [
+  {
+    name: "🕸️ Compiled instruction + schema: steer 1.0",
+    schema: true,
+    text: `# Can weights replace a system prompt?
+# The schema (checkbox below) forces both models to answer only with
+#   {"triples": [{subject, predicate, object}]}
+# but says nothing about WHAT a good triple is. Normally a system prompt does that.
+# Here the instruction is compiled into the weights instead:
+#   u = hidden state WITH the prompt "You are a knowledge-graph extractor…"
+#       minus the hidden state WITHOUT it, at layer 8
+#   W += 1.0 · outer(u, a/|a|²) in mlp.down_proj, layers 6-11
+# Neither model gets a system prompt. Only the weights differ.
+layers.6-11.mlp.down_proj steer kg-instruction 1.0`,
+    prompts: KG_PROMPTS,
+  },
+  {
+    name: "Compiled instruction, no schema: steer 1.5",
+    schema: false,
+    text: `# Without the schema, the compiled instruction shows up as a terse,
+# fact-only answering style ("Bill Gates", "Paris") instead of paragraphs.
+layers.6-11.mlp.down_proj steer kg-instruction 1.5`,
+    prompts: KG_PROMPTS,
+  },
+  {
+    name: "Format steer (doesn't work): steer kg 1.2",
+    schema: false,
+    text: `# Lesson: steering toward what triples LOOK like learns the punctuation,
+# not the idea. Expect stray ")" and invented facts, not a knowledge graph.
+# u = mean hidden state on "(subject, predicate, object)" lines
+#     minus the same facts written as prose.
+layers.6-11.mlp.down_proj steer kg 1.2`,
+    prompts: KG_PROMPTS,
+  },
+  {
+    name: "Too much: steer 3",
+    schema: true,
+    text: `# Push the compiled instruction too hard: the schema still holds,
+# but the triples fill with junk.
+layers.6-11.mlp.down_proj steer kg-instruction 3`,
+    prompts: KG_PROMPTS,
+  },
+];
+
 const MAIN_PRESETS = [
   {
     name: "Wedding Qwen: concept injection",
@@ -167,7 +235,7 @@ layers.* noise 0.05`,
     text: `layers.*.mlp.down_proj scale 1.3`,
   },
 ];
-const PRESETS = PAGE === "diwali" ? DIWALI_PRESETS : PAGE === "insurance" ? INSURANCE_PRESETS : MAIN_PRESETS;
+const PRESETS = PAGE === "diwali" ? DIWALI_PRESETS : PAGE === "insurance" ? INSURANCE_PRESETS : PAGE === "kg" ? KG_PRESETS : MAIN_PRESETS;
 
 const DEFAULT_PROMPTS = `Write a haiku about autumn.
 Tell me about your weekend.
@@ -197,7 +265,7 @@ function setProgress(id, frac, label) {
 // ---------------------------------------------------------------- state
 
 const S = {
-  setup: PAGE === "diwali" || PAGE === "insurance" ? SETUPS[0] : SETUPS[1], // a single model is enough for the default preset
+  setup: PAGE === "diwali" || PAGE === "insurance" || PAGE === "kg" ? SETUPS[0] : SETUPS[1], // a single model is enough for the default preset
   kernels: null, info: null, donorInfo: null,
   analysis: null, engine: null, loadedId: null, busy: false, baseMemo: new Map(),
   hasF16: false,
@@ -230,7 +298,7 @@ async function init() {
   }
 
   setupSel.addEventListener("change", () => { S.setup = SETUPS.find((s) => s.id === setupSel.value); S.info = S.donorInfo = S.analysis = null; renderPresets(); refresh(); });
-  $("#preset").addEventListener("change", (e) => { const p = PRESETS[+e.target.value]; if (p) { $("#program").value = p.text; if (p.prompts) $("#prompts").value = p.prompts; recompile(); } });
+  $("#preset").addEventListener("change", (e) => { const p = PRESETS[+e.target.value]; if (p) { $("#program").value = p.text; if (p.prompts) $("#prompts").value = p.prompts; if (p.schema !== undefined && $("#schema")) $("#schema").checked = p.schema; recompile(); } });
   $("#program").addEventListener("input", debounce(recompile, 250));
   $("#download").addEventListener("click", () => guard(download));
   $("#analyze").addEventListener("click", () => guard(analyze));
@@ -385,9 +453,9 @@ async function loadEngine(r, records) {
   return S.engine;
 }
 
-async function generate(engine, prompt, maxTokens, onText) {
+async function generate(engine, prompt, maxTokens, onText, extra) {
   const chunks = await engine.chat.completions.create({
-    messages: [{ role: "user", content: prompt }], temperature: 0, max_tokens: maxTokens, stream: true,
+    messages: [{ role: "user", content: prompt }], temperature: 0, max_tokens: maxTokens, stream: true, ...(extra ?? {}),
   });
   let text = "";
   for await (const c of chunks) { text += c.choices[0]?.delta?.content ?? ""; onText(text); }
@@ -417,18 +485,21 @@ async function buildAndCompare() {
   });
 
   // original model (memoized)
-  const memoKey = (p) => `${S.setup.base}|${maxTokens}|${p}`;
+  // Knowledge-graph tab only: optional JSON-schema constrained decoding, applied to both models.
+  const extra = PAGE === "kg" && $("#schema")?.checked
+    ? { response_format: { type: "json_object", schema: JSON.stringify(KG_SCHEMA) } } : undefined;
+  const memoKey = (p) => `${S.setup.base}|${maxTokens}|${extra ? "schema|" : ""}${p}`;
   if (rows.some((r) => !S.baseMemo.has(memoKey(r.p)))) {
     const eng = await loadEngine(baseRec, records);
     for (const r of rows) {
       if (S.baseMemo.has(memoKey(r.p))) continue;
-      S.baseMemo.set(memoKey(r.p), await generate(eng, r.p, maxTokens, (t) => (r.a.textContent = t)));
+      S.baseMemo.set(memoKey(r.p), await generate(eng, r.p, maxTokens, (t) => (r.a.textContent = t), extra));
     }
   }
   rows.forEach((r) => (r.a.textContent = S.baseMemo.get(memoKey(r.p))));
 
   const eng = await loadEngine(pr, records);
-  for (const r of rows) await generate(eng, r.p, maxTokens, (t) => (r.b.textContent = t));
+  for (const r of rows) await generate(eng, r.p, maxTokens, (t) => (r.b.textContent = t), extra);
   log("done: same prompts, same decoding, only the weights changed", "ok");
 }
 
