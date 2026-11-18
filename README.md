@@ -36,6 +36,24 @@ On prompts that have nothing to do with festivals ("What should I do this evenin
 
 Why not the small Qwen? "Diwali" is three tokens in every vocabulary here, and adding single-word embeddings like "festive + lights + lamps" only gets Qwen-0.5B to "Happy New Year". A direction taken from the model's activations carries the whole idea. The 1B Llama knows enough about Diwali for that direction to land.
 
+## ✈️ Aircraft-Manual tab: Simplified Technical English from the weights
+
+Andrej Karpathy [suggested](https://www.searchenginejournal.com/karpathy-llm-aircraft-manual-writing/591813/) asking LLMs to explain things in [ASD-STE100](https://www.asd-ste100.org/) Simplified Technical English, the controlled language of aircraft maintenance manuals. The [Aircraft-Manual tab](https://vishalmysore.github.io/webWeightSpace/ste.html) builds that style into the weights of **Llama-3.2-1B-Instruct**, with no system prompt:
+
+```
+layers.6-11.mlp.down_proj steer ste 1.3
+```
+
+The direction `u` is a *style* direction. The model reads twenty short texts written in STE ("Remove the wheel. Clean the hub. Install the new wheel.") and the **same twenty texts** written as wordy everyday prose. Because the content is identical on both sides, the topics cancel and only the writing style is left.
+
+| Prompt | Original | Edited (steer 1.3, in the browser) |
+|---|---|---|
+| How do I change a flat tyre? | "Changing a flat tire can seem like a daunting task, but it's actually quite straightforward…" | "To change a flat tire, follow these steps: 1. Find a safe location… 2. Gather equipment… 3. Loosen the lug nuts." |
+| How do I reset my home Wi-Fi router? | "…a relatively simple process… Method 1: Using the Router's Web Interface" | "1. Unplug the power cord… 3. Use a paperclip or a pin to push the button for 10 seconds. 4. Release the button. 5. Plug the power cord back in." |
+| What is the capital of France? | Paris | Paris |
+
+The edited model drops the filler, the bold headings and the "I'd be happy to explain". At 1.6 it becomes a stuttering checklist ("Do not, Do Not, Do Not"). This is STE-*style*: the real standard also has a dictionary of approved words, which a single direction can't enforce, and the 1B model's facts are no better than before.
+
 ## Run it
 
 ```bash
@@ -90,7 +108,7 @@ Unquantized MLC builds only (`q0f16`, `q0f32`). Quantized `q4f16` weights would 
 
 - Qwen2.5-0.5B-Instruct + Qwen2.5-Coder-0.5B-Instruct (same architecture and model library, so `mix` works)
 - SmolLM2-360M-Instruct, SmolLM2-135M-Instruct (no attention biases, so no `inject`)
-- Llama-3.2-1B-Instruct, on the Diwali tab (`steer`)
+- Llama-3.2-1B-Instruct, on the Diwali, Insurance, Knowledge-Graph and Aircraft-Manual tabs (`steer`)
 
 ## Findings from a PyTorch reference run (same weights, greedy decoding)
 

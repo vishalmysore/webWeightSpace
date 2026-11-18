@@ -15,6 +15,8 @@ the edited model just has different weights.
     python tools/make_steer_vector.py --name insurance --test 0.8 1.2 1.6
     python tools/make_steer_vector.py --name kg
     python tools/make_steer_vector.py --name kg-instruction --system kg   # "kg" = use KG_SYSTEM
+    python tools/make_steer_vector.py --name ste --test 1.0 1.5
+    python tools/make_steer_vector.py --name ste-instruction --system ste --test 1.0 1.5
 """
 import argparse, base64, json
 import torch
@@ -130,6 +132,63 @@ INSTRUCTION_CALIB = [
 ]
 KG_SYSTEM = ("You are a knowledge-graph extractor. Answer every question only with facts written as "
              "(subject, predicate, object) triples, one per line. Use short snake_case predicates. No prose.")
+# ASD-STE100 Simplified Technical English (the aircraft-manual standard). "ste" pairs each STE
+# text with the same content in ordinary wordy prose, so the direction captures the writing
+# style (short sentences, active voice, one instruction per sentence), not the topics.
+CONCEPTS["ste"] = [
+    "Remove the wheel. Clean the hub. Install the new wheel. Tighten the nuts.",
+    "The pump moves the fuel to the engine. The filter removes dirt from the fuel.",
+    "Do not touch the hot surface. Wear gloves. Let the unit cool for 10 minutes.",
+    "Turn the valve clockwise. Make sure that the pressure gauge shows zero.",
+    "The heart pumps blood. The blood carries oxygen to the body.",
+    "Close the door. Push the lock lever down. Make sure that the door is locked.",
+    "Water boils at 100 degrees Celsius. Ice melts at 0 degrees Celsius.",
+    "Disconnect the power. Remove the four screws. Lift the cover.",
+    "The battery stores energy. The motor uses this energy to turn the wheel.",
+    "Examine the cable for damage. If the cable is damaged, replace it.",
+    "Plants use sunlight to make food. This process is photosynthesis.",
+    "Read all the steps before you start. Do the steps in sequence.",
+    "Rome was the capital of a large empire. The empire ended in the year 476.",
+    "Boil the water. Add the pasta. Cook it for 10 minutes. Drain the water.",
+    "Drink water every day. Sleep for seven to eight hours. Walk for 30 minutes.",
+    "Shakespeare wrote plays and poems. He lived in England in the 1500s.",
+    "Save your work. Close all programs. Restart the computer.",
+    "Rain falls from clouds. The water flows into rivers. The rivers flow into the sea.",
+    "Pay the bill before the due date. Keep a copy of the receipt.",
+    "The moon goes around the Earth. One orbit takes about 27 days.",
+]
+OTHER_BY_CONCEPT["ste"] = [
+    "Once you have managed to get the old wheel off, it's a good idea to give the hub a quick clean before the new one goes on and the nuts are tightened up.",
+    "Fuel is drawn along to the engine by the pump, and along the way any dirt that might be present is taken out by the filter, which is quite important really.",
+    "It would probably be wise to avoid touching the surface while it's hot, so gloves are recommended, and you might want to give the unit around ten minutes or so to cool down.",
+    "The valve should be turned in a clockwise direction, at which point it would be worth checking that the reading on the pressure gauge has gone all the way back down to zero.",
+    "Blood is pumped around by the heart, which is essentially what allows oxygen to be carried to all of the various parts of the body.",
+    "After the door has been closed, the lock lever ought to be pushed downwards, and then it's worth double-checking that everything has actually been locked properly.",
+    "As you may well know, water tends to boil when it reaches around 100 degrees Celsius, whereas ice will generally begin to melt at roughly 0 degrees.",
+    "Before doing anything else, the power should be disconnected, after which the four screws holding the cover in place can be taken out so that it can be lifted away.",
+    "Energy is stored by the battery, and it is this energy that is subsequently used by the motor in order for the wheel to be turned.",
+    "It is generally recommended that the cable be looked over for any signs of damage, and if it turns out that it has been damaged, then a replacement would be advisable.",
+    "Interestingly enough, plants are able to make use of sunlight in order to produce their own food, which is a fascinating process that has come to be known as photosynthesis.",
+    "It's usually a good idea to have a read through all of the steps beforehand, and then try to make sure that they're carried out in the order in which they're given.",
+    "Back in ancient times, Rome served as the capital of what was a truly vast empire, one that eventually came to an end somewhere around the year 476.",
+    "Once the water has been brought to the boil, the pasta can be added and left to cook for roughly ten minutes or so before it's drained.",
+    "It's widely considered important to stay hydrated throughout the day, to aim for something like seven or eight hours of sleep, and to try to fit in a decent walk.",
+    "Shakespeare, who is of course one of the most celebrated writers of all time, produced a remarkable body of plays and poems while living in England back in the 1500s.",
+    "Before going any further, it might be worth saving whatever you happen to be working on and closing down your programs, and then the computer can be restarted.",
+    "Rain, which comes down from the clouds, eventually finds its way into rivers, and these in turn end up making their way out towards the sea.",
+    "Ideally, the bill ought to be paid before the due date comes around, and it's always sensible to hang on to a copy of the receipt just in case.",
+    "As it happens, the moon travels around the Earth, and each complete orbit ends up taking somewhere in the region of 27 days or thereabouts.",
+]
+PAIRED = {"ste"}   # contrast sets that say the same thing in another style
+STE_PROMPTS = ["Explain how a refrigerator works.", "How do I change a flat tyre?",
+               "Why is the sky blue?", "What should I do if my laptop gets wet?",
+               "What is the capital of France?"]
+PROMPTS_BY_CONCEPT["ste"] = PROMPTS_BY_CONCEPT["ste-instruction"] = STE_PROMPTS
+STE_SYSTEM = ("Write every answer in ASD-STE100 Simplified Technical English. Use short sentences: "
+              "no more than 20 words for procedures and 25 words for descriptions. Use the active voice. "
+              "Write instructions in the imperative. Give one instruction per sentence. Use simple, "
+              "common words with one meaning. Do not use idioms, filler or marketing language.")
+
 CALIB = [
     "Write a short message for my friends.",
     "What is the capital of France? The capital is Paris, a city on the Seine.",
@@ -176,6 +235,8 @@ def mean_turn_hidden(questions, system, l):
 
 if args.system == "kg":
     args.system = KG_SYSTEM
+if args.system == "ste":
+    args.system = STE_SYSTEM
 if args.system:
     # "Compiled system prompt": how the model's state differs when the instruction is present.
     base = mean_turn_hidden(INSTRUCTION_CALIB, None, args.at)
@@ -183,6 +244,8 @@ if args.system:
 else:
     base = mean_hidden(NEUTRAL, args.at)
     u = mean_hidden(CONCEPTS[args.name], args.at) - (base + mean_hidden(OTHER_BY_CONCEPT.get(args.name, OTHER), args.at)) / 2
+    if args.name in PAIRED:   # same content both sides: subtract only the paired texts
+        u = mean_hidden(CONCEPTS[args.name], args.at) - mean_hidden(OTHER_BY_CONCEPT[args.name], args.at)
 u[base.abs().topk(3).indices] = 0          # drop the always-huge "massive activation" dims
 u = u / u.norm()
 

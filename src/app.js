@@ -27,6 +27,7 @@ const ALL_SETUPS = [
   { id: "llama1b", label: "Llama-3.2-1B-Instruct (f16, 2.5 GB)", base: "Llama-3.2-1B-Instruct-q0f16-MLC", page: "diwali" },
   { id: "llama1b-insurance", label: "Llama-3.2-1B-Instruct (f16, 2.5 GB)", base: "Llama-3.2-1B-Instruct-q0f16-MLC", page: "insurance" },
   { id: "llama1b-kg", label: "Llama-3.2-1B-Instruct (f16, 2.5 GB)", base: "Llama-3.2-1B-Instruct-q0f16-MLC", page: "kg" },
+  { id: "llama1b-ste", label: "Llama-3.2-1B-Instruct (f16, 2.5 GB)", base: "Llama-3.2-1B-Instruct-q0f16-MLC", page: "ste" },
 ];
 const SETUPS = ALL_SETUPS.filter((s) => (s.page ?? "main") === PAGE);
 
@@ -235,7 +236,43 @@ layers.* noise 0.05`,
     text: `layers.*.mlp.down_proj scale 1.3`,
   },
 ];
-const PRESETS = PAGE === "diwali" ? DIWALI_PRESETS : PAGE === "insurance" ? INSURANCE_PRESETS : PAGE === "kg" ? KG_PRESETS : MAIN_PRESETS;
+const STE_PROMPTS = `How do I change a flat tyre?
+What should I do if my laptop gets wet?
+Explain how a refrigerator works.
+How do I reset my home Wi-Fi router?
+What is the capital of France?`;
+
+const STE_PRESETS = [
+  {
+    name: "✈️ Aircraft-manual Llama: steer 1.3",
+    text: `# Write like an aircraft manual ✈️
+# ASD-STE100 Simplified Technical English: short sentences, active voice,
+# one instruction per sentence, no filler. No system prompt asks for it.
+# One rule rewrites mlp.down_proj in layers 6-11:
+#   W += 1.3 · outer(u, a/|a|²)
+# u = "STE direction": the model's mean hidden state on 20 texts written in STE
+#     minus its mean on the SAME 20 texts written as wordy everyday prose,
+#     so the topics cancel and only the writing style is left
+#     (vectors/ste.Llama-3.2-1B-Instruct.json)
+layers.6-11.mlp.down_proj steer ste 1.3`,
+    prompts: STE_PROMPTS,
+  },
+  {
+    name: "Gentle: steer 0.8",
+    text: `# A lighter push: less filler, fewer headings, same content.
+layers.6-11.mlp.down_proj steer ste 0.8`,
+    prompts: STE_PROMPTS,
+  },
+  {
+    name: "Too much: steer 1.6",
+    text: `# Push harder and it turns into a stuttering checklist:
+# "Do not, Do Not, Do Not" and steps that no longer make sense.
+layers.6-11.mlp.down_proj steer ste 1.6`,
+    prompts: STE_PROMPTS,
+  },
+];
+
+const PRESETS = PAGE === "diwali" ? DIWALI_PRESETS : PAGE === "insurance" ? INSURANCE_PRESETS : PAGE === "kg" ? KG_PRESETS : PAGE === "ste" ? STE_PRESETS : MAIN_PRESETS;
 
 const DEFAULT_PROMPTS = `Write a haiku about autumn.
 Tell me about your weekend.
@@ -265,7 +302,7 @@ function setProgress(id, frac, label) {
 // ---------------------------------------------------------------- state
 
 const S = {
-  setup: PAGE === "diwali" || PAGE === "insurance" || PAGE === "kg" ? SETUPS[0] : SETUPS[1], // a single model is enough for the default preset
+  setup: PAGE === "diwali" || PAGE === "insurance" || PAGE === "kg" || PAGE === "ste" ? SETUPS[0] : SETUPS[1], // a single model is enough for the default preset
   kernels: null, info: null, donorInfo: null,
   analysis: null, engine: null, loadedId: null, busy: false, baseMemo: new Map(),
   hasF16: false,

@@ -11,7 +11,7 @@
 </head>
 <body data-page="kg">
 <header>
-  <nav class="tabs"><a href="./">Playground</a><a href="./diwali.html">🪔 Diwali Llama</a><a href="./insurance.html">🛡️ Insurance Llama</a><a href="./kg.html" class="on">🕸️ Knowledge-Graph Llama</a></nav>
+  <nav class="tabs"><a href="./">Playground</a><a href="./diwali.html">🪔 Diwali Llama</a><a href="./insurance.html">🛡️ Insurance Llama</a><a href="./kg.html" class="on">🕸️ Knowledge-Graph Llama</a><a href="./ste.html">✈️ Aircraft-Manual Llama</a></nav>
   <h1>web<em>Weight</em>Space</h1>
   <p class="lede">Can a model be edited to answer <b>only with a knowledge graph</b>? Two pieces work together here. A JSON schema (WebLLM's constrained decoding) guarantees the shape: both models can output nothing but <code>{"triples":[{subject, predicate, object}]}</code>. A rank-one weight edit to <b>Llama-3.2-1B-Instruct</b> then stands in for the system prompt that would normally say what a good triple is: it is the difference in the model's own hidden state with and without a "you are a knowledge-graph extractor" instruction, compiled into six layers. Neither model gets a system prompt. Download once (2.5 GB, shared with the other Llama tabs), then press <b>Build &amp; compare</b>. <i>A 1B model knows a limited number of facts and some triples will be wrong; this is a demo of model editing, not a knowledge-graph builder.</i></p>
   <span id="gpu" class="chip">checking WebGPU…</span>
